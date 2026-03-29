@@ -7,7 +7,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.utils.data.sampler import SubsetRandomSampler
 from dataloader import IEMOCAPDataset, MELDDataset
-from model import MaskedNLLLoss, MaskedKLDivLoss, SDT_MoER_Model
+from model import MaskedNLLLoss, MaskedKLDivLoss, MoER_Model
 from sklearn.metrics import f1_score, confusion_matrix, accuracy_score, classification_report
 import pickle as pk
 import datetime
@@ -19,13 +19,13 @@ def get_train_valid_sampler(trainset, valid=0.1, dataset='MELD'):
     return SubsetRandomSampler(idx[split:]), SubsetRandomSampler(idx[:split])
 
 def get_MELD_loaders(batch_size=32, valid=0.1, num_workers=0, pin_memory=False):
-    trainset = MELDDataset('/data/zzb/BaseLine/SDT/data/meld_multimodal_features.pkl')
+    trainset = MELDDataset('/data/zzb/BaseLine/Nine/data/meld_multimodal_features.pkl')
     train_sampler, valid_sampler = get_train_valid_sampler(trainset, valid, 'MELD')
     train_loader = DataLoader(trainset, batch_size=batch_size, sampler=train_sampler,
                               collate_fn=trainset.collate_fn, num_workers=num_workers, pin_memory=pin_memory)
     valid_loader = DataLoader(trainset, batch_size=batch_size, sampler=valid_sampler,
                               collate_fn=trainset.collate_fn, num_workers=num_workers, pin_memory=pin_memory)
-    testset = MELDDataset('/data/zzb/BaseLine/SDT/data/meld_multimodal_features.pkl', train=False)
+    testset = MELDDataset('/data/zzb/BaseLine/Nine/data/meld_multimodal_features.pkl', train=False)
     test_loader = DataLoader(testset, batch_size=batch_size, collate_fn=testset.collate_fn,
                              num_workers=num_workers, pin_memory=pin_memory)
     return train_loader, valid_loader, test_loader
@@ -59,7 +59,6 @@ def train_or_eval_model(model, loss_function, kl_loss, dataloader, epoch, optimi
         qmask = qmask.permute(1, 0, 2)
         lengths = [(umask[j] == 1).nonzero().tolist()[-1][0] + 1 for j in range(len(umask))]
 
-        # 获取底层输出: 包含传统 Logits 和新的不确定性 (t_u, a_u, v_u) 以及辅助 Loss
         log_prob1, log_prob2, log_prob3, all_log_prob, all_prob, \
         kl_log_prob1, kl_log_prob2, kl_log_prob3, kl_all_prob, \
         t_u, a_u, v_u, moe_balance_loss, vib_loss, mi_loss = model(
@@ -80,24 +79,17 @@ def train_or_eval_model(model, loss_function, kl_loss, dataloader, epoch, optimi
         a_u_flat = a_u.view(-1, 1)
         v_u_flat = v_u.view(-1, 1)
 
-        # 1. 强力主干分类损失 (MaskedNLLLoss 确保基础 SOTA 性能)
         loss_cls = gamma_1 * loss_function(lp_all, labels_, umask) + \
                    gamma_2 * (loss_function(lp_1, labels_, umask) + 
                               loss_function(lp_2, labels_, umask) + 
                               loss_function(lp_3, labels_, umask))
-        
-        # 2. 认知不确定性引导的动态蒸馏 (EUG-DED: 利用 u 调控 KL 权重)
-        # 修复：移除 kl_p_all.detach()，恢复双向互学习梯度；u_student 已经在 Loss 内部被 detach 保护。
+
         loss_distill = gamma_3 * (kl_loss(kl_lp_1, kl_p_all, umask, u_student=t_u_flat) + 
                                   kl_loss(kl_lp_2, kl_p_all, umask, u_student=a_u_flat) + 
                                   kl_loss(kl_lp_3, kl_p_all, umask, u_student=v_u_flat))
 
-        # 3. 全局总 Loss 融合
         loss = loss_cls + loss_distill + \
                0.0001 * moe_balance_loss + 0.0000001 * vib_loss + 0.001 * mi_loss
-        
-        # 3. 全局总 Loss 融合
-        # loss = loss_cls + loss_distill 
 
         lp_ = all_prob.view(-1, all_prob.size()[2])
         pred_ = torch.argmax(lp_, 1)
@@ -160,7 +152,7 @@ if __name__ == '__main__':
     n_speakers = 9 if args.Dataset=='MELD' else 2
     n_classes = 7 if args.Dataset=='MELD' else 6 if args.Dataset=='IEMOCAP' else 1
 
-    model = SDT_MoER_Model(args.Dataset, args.temp, D_text, D_visual, D_audio, args.n_head,
+    model = MoER_Model(args.Dataset, args.temp, D_text, D_visual, D_audio, args.n_head,
                            n_classes=n_classes,
                            hidden_dim=args.hidden_dim,
                            n_speakers=n_speakers,
@@ -214,7 +206,7 @@ if __name__ == '__main__':
     print('F-Score: {}'.format(max_fscore))
     print('F-Score-index: {}'.format(all_fscore.index(max_fscore) + 1))
     
-    save_dir = "/data/zzb/BaseLine/nine/SDT-main/result"
+    save_dir = "/data/zzb/BaseLine/nine/main/result"
     if not os.path.exists(save_dir):
         os.makedirs(save_dir) 
     

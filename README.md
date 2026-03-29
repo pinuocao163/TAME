@@ -1,1 +1,1 @@
-TAME: Robust Multimodal Emotion Recognition via Topology-Aware Mixture-of-Experts and Uncertainty-Guided Distillation
+TAME-DD: Multimodal Dialogue Emotion Recognition via Topology-Aware Mixture-of-Experts and Dynamic Distillation

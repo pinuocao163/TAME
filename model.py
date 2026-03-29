@@ -3,14 +3,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# ==========================================
-# 核心模块 1：基于协方差的特征正交解耦损失 (IT-MoE)
-# ==========================================
 class Orthogonal_Decoupling_Loss(nn.Module):
-    """
-    基于协方差/正交性的解耦损失，严格计算 Shared 和 Specific 特征之间的正交性。
-    该损失无内部参数，严格为正，完全杜绝了优化过程中的 NaN 崩塌现象。
-    """
+
     def __init__(self):
         super(Orthogonal_Decoupling_Loss, self).__init__()
 
@@ -18,11 +12,9 @@ class Orthogonal_Decoupling_Loss(nn.Module):
         x_shared = x_shared.view(-1, x_shared.size(-1))
         x_specific = x_specific.view(-1, x_specific.size(-1))
 
-        # L2 归一化
         x_shared_norm = F.normalize(x_shared, p=2, dim=1)
         x_specific_norm = F.normalize(x_specific, p=2, dim=1)
 
-        # 惩罚相关性矩阵的非对角线
         correlation_matrix = torch.matmul(x_shared_norm.t(), x_specific_norm)
         loss = torch.norm(correlation_matrix, p='fro') / x_shared.size(0)
         return loss
@@ -36,15 +28,11 @@ class MaskedKLDivLoss(nn.Module):
         mask_ = mask.view(-1, 1)
         loss_elements = self.loss(log_pred * mask_, target * mask_)
         loss_per_sample = loss_elements.sum(dim=-1)
-        
-        # 【终极修复核心】
+
         if u_student is not None:
-            # 1. 必须 detach()! 严禁梯度通过权重传导，防止模型为降Loss故意输出高不确定性作弊
+
             u_detached = u_student.detach().squeeze(-1)
-            
-            # 2. 放弃容易饿死模型的 (1 - u)，改用理论更优雅、永远大于0的指数惩罚 exp(-gamma * u)
-            # 或者使用保守线性截断： torch.clamp(1.0 - u_detached, min=0.2)
-            # 这里推荐使用带底线的平滑缩放，保证至少有 20% 的蒸馏知识流向学生
+
             weight = torch.clamp(1.0 - u_detached, min=0.2) 
             
             loss_per_sample = loss_per_sample * weight
@@ -85,9 +73,6 @@ class PositionwiseFeedForward(nn.Module):
         output = self.dropout_2(self.w_2(inter))
         return output + x
 
-# ==========================================
-# 核心模块 3：拓扑感知关系路由器 (TARR) + IT-MoE 层
-# ==========================================
 class IT_TARR_MoELayer(nn.Module):
     def __init__(self, d_model, d_ff, num_experts, dropout=0.1):
         super(IT_TARR_MoELayer, self).__init__()
@@ -112,8 +97,7 @@ class IT_TARR_MoELayer(nn.Module):
 
     def forward(self, x, spk_idx):
         B, L, D = x.size()
-        
-        # 1. 注入拓扑图先验 (时序距离 + 说话人身份)
+
         dist_mat = torch.abs(torch.arange(L).unsqueeze(0) - torch.arange(L).unsqueeze(1)).to(x.device).float()
         dist_mat = dist_mat.unsqueeze(0).expand(B, L, L)
         spk_mat = (spk_idx.unsqueeze(1) == spk_idx.unsqueeze(2)).float()
@@ -142,19 +126,16 @@ class IT_TARR_MoELayer(nn.Module):
                 specific_out += weighted_e_out
             else:
                 shared_out += weighted_e_out
-                
-        # 2. 变分信息瓶颈 (VIB) 正则化
+
         mu = self.vib_mu(shared_out)
         logvar = self.vib_logvar(shared_out)
-        logvar = torch.clamp(logvar, min=-15.0, max=10.0) # 截断防止指数爆炸
+        logvar = torch.clamp(logvar, min=-15.0, max=10.0) 
         
         z_shared = mu + torch.randn_like(logvar) * torch.exp(0.5 * logvar)
         vib_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - torch.exp(logvar)) / (B * L)
-        
-        # 3. 计算正交解耦惩罚
+
         mi_loss = self.ortho_loss(z_shared, specific_out)
-        
-        # 负载均衡防止路由崩塌
+
         importance = expert_weights.sum(dim=(0, 1))
         importance = importance / (importance.sum() + 1e-9)
         moe_balance_loss = self.num_experts * torch.sum(importance ** 2) - 1
@@ -290,10 +271,10 @@ class Multimodal_GatedFusion(nn.Module):
         utters_softmax = self.softmax(utters_fc)
         return torch.sum(utters_softmax * utters, dim=-2, keepdim=False)
 
-class SDT_MoER_Model(nn.Module):
+class MoER_Model(nn.Module):
     def __init__(self, dataset, temp, D_text, D_visual, D_audio, n_head,
                  n_classes, hidden_dim, n_speakers, dropout, num_experts=4):
-        super(SDT_MoER_Model, self).__init__()
+        super(MoER_Model, self).__init__()
         self.temp = temp
         self.n_classes = n_classes
         self.n_speakers = n_speakers
@@ -386,7 +367,6 @@ class SDT_MoER_Model(nn.Module):
 
         all_transformer_out = self.last_gate(t_transformer_out, a_transformer_out, v_transformer_out)
 
-        # 1. 主分类输出
         t_final_out = self.t_output_layer(t_transformer_out)
         a_final_out = self.a_output_layer(a_transformer_out)
         v_final_out = self.v_output_layer(v_transformer_out)
@@ -398,13 +378,11 @@ class SDT_MoER_Model(nn.Module):
         all_log_prob = F.log_softmax(all_final_out, 2)
         all_prob = F.softmax(all_final_out, 2)
 
-        # 2. 温度平滑软标签（用于高质量蒸馏）
         kl_t_log_prob = F.log_softmax(t_final_out / self.temp, 2)
         kl_a_log_prob = F.log_softmax(a_final_out / self.temp, 2)
         kl_v_log_prob = F.log_softmax(v_final_out / self.temp, 2)
         kl_all_prob = F.softmax(all_final_out / self.temp, 2)
 
-        # 3. 计算认知不确定性 (Evidence -> Alpha -> Uncertainty)
         t_alpha = F.softplus(t_final_out) + 1
         a_alpha = F.softplus(a_final_out) + 1
         v_alpha = F.softplus(v_final_out) + 1
