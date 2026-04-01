@@ -123,7 +123,7 @@ if __name__ == '__main__':
     parser.add_argument('--l2', type=float, default=0.00001, metavar='L2', help='L2 regularization weight')
     parser.add_argument('--dropout', type=float, default=0.5, metavar='dropout', help='dropout rate')
     parser.add_argument('--batch-size', type=int, default=8, metavar='BS', help='batch size')
-    parser.add_argument('--hidden_dim', type=int, default=1024, metavar='hidden_dim', help='output hidden size')
+    parser.add_argument('--hidden_dim', type=int, default=512, metavar='hidden_dim', help='output hidden size')
     parser.add_argument('--n_head', type=int, default=8, metavar='n_head', help='number of heads')
     parser.add_argument('--num_experts', type=int, default=4, metavar='num_experts', help='number of MoE experts')
     parser.add_argument('--epochs', type=int, default=150, metavar='E', help='number of epochs')
