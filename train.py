@@ -127,7 +127,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_head', type=int, default=8, metavar='n_head', help='number of heads')
     parser.add_argument('--num_experts', type=int, default=8, metavar='num_experts', help='number of MoE experts')
     parser.add_argument('--epochs', type=int, default=150, metavar='E', help='number of epochs')
-    parser.add_argument('--temp', type=int, default=8, metavar='temp', help='temp')
+    parser.add_argument('--temp', type=int, default=1, metavar='temp', help='temp')
     parser.add_argument('--tensorboard', action='store_true', default=False, help='Enables tensorboard log')
     parser.add_argument('--class-weight', action='store_true', default=True, help='use class weights')
     parser.add_argument('--Dataset', default='IEMOCAP', help='dataset to train and test')
